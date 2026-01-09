@@ -6,16 +6,6 @@
 // ==========================================
 
 // Emergency stop for error loop
-bot.command('emergency', async (ctx) => {
-    console.log('🆘 Emergency stop triggered by:', ctx.from.id);
-    errorCooldowns.clear();
-    await ctx.reply('🆘 Emergency error reset executed. Bot should respond now.');
-    
-    // Force respond to other commands
-    setTimeout(async () => {
-        await ctx.reply('✅ Bot is now responsive. Try /start or /admin');
-    }, 1000);
-});
 
 const { Telegraf, Scenes, session, Markup } = require('telegraf');
 const { MongoClient, ObjectId } = require('mongodb');
