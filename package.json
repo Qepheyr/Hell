@@ -1,7 +1,7 @@
 {
-  "name": "two_telegram-bot",
+  "name": "telegram-bot",
   "version": "1.0.0",
-  "description": "Telegram Bot with Channel Verification & Code Generation",
+  "description": "Telegram Bot with MongoDB and Cloudinary",
   "main": "index.js",
   "scripts": {
     "start": "node index.js",
@@ -9,16 +9,16 @@
   },
   "dependencies": {
     "telegraf": "^4.16.3",
-    "mongodb": "^6.5.0",
-    "cloudinary": "^1.41.3",
+    "mongodb": "^6.6.1",
+    "cloudinary": "^2.0.3",
     "node-fetch": "^2.7.0",
     "dotenv": "^16.3.1",
-    "express": "^4.18.2"
-  },
-  "devDependencies": {
-    "nodemon": "^3.0.1"
+    "crypto": "^1.0.1"
   },
   "engines": {
     "node": ">=16.0.0"
-  }
+  },
+  "keywords": ["telegram", "bot", "mongodb", "cloudinary"],
+  "author": "",
+  "license": "ISC"
 }
