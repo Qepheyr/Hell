@@ -619,14 +619,22 @@ bot.on('chat_join_request', async (ctx) => {
         if (channel) {
             // Check if auto accept is enabled for this channel
             let shouldAccept = globalAutoAccept;
+            let shouldNotify = true; // Default to notify admin
             
             // For private channels, check channel-specific setting
             if (channel.type === 'private') {
                 const channelAutoAccept = channel.autoAccept !== false; // Default true
                 shouldAccept = globalAutoAccept && channelAutoAccept;
+                
+                // If auto-accept is disabled for this private channel, don't notify admin
+                if (!channelAutoAccept) {
+                    shouldNotify = false;
+                    console.log(`🔕 Silent join request for private channel "${channel.title}" (Auto-accept disabled)`);
+                }
             } else {
                 // Public channels don't need approval
                 shouldAccept = false;
+                shouldNotify = true;
             }
             
             if (shouldAccept) {
@@ -664,7 +672,11 @@ bot.on('chat_join_request', async (ctx) => {
                 }
             } else {
                 console.log(`⏸️ Join request not auto-approved for user ${userId} in channel ${channel.title}`);
-                await notifyAdmin(`⏸️ <b>Join Request Pending</b>\n\n👤 User: ${userId}\n📺 Channel: ${channel.title}\n🔗 Type: ${channel.type}\n⚙️ Auto-accept: Disabled\n\n⚠️ Manual approval required`);
+                
+                // Only notify admin if shouldNotify is true
+                if (shouldNotify) {
+                    await notifyAdmin(`⏸️ <b>Join Request Pending</b>\n\n👤 User: ${userId}\n📺 Channel: ${channel.title}\n🔗 Type: ${channel.type}\n⚙️ Auto-accept: Disabled\n\n⚠️ Manual approval required`);
+                }
             }
         } else {
             console.log(`⚠️ Join request for unknown chat ${chatId}`);
