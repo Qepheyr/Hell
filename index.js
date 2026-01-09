@@ -174,6 +174,42 @@ async function initBot() {
 // HELPER FUNCTIONS
 // ==========================================
 
+// ==========================================
+// ERROR COOLDOWN SYSTEM
+// ==========================================
+
+const errorCooldowns = new Map();
+
+// Check if error should be processed
+function canProcessError(errorKey, maxAttempts = 2, cooldownMs = 60000) {
+    const now = Date.now();
+    const errorData = errorCooldowns.get(errorKey) || { attempts: 0, lastAttempt: 0 };
+    
+    // Reset if cooldown passed
+    if (now - errorData.lastAttempt > cooldownMs) {
+        errorData.attempts = 0;
+    }
+    
+    // Check if max attempts reached
+    if (errorData.attempts >= maxAttempts) {
+        console.log(`⏸️ Skipping error ${errorKey} - reached max attempts (${maxAttempts})`);
+        return false;
+    }
+    
+    // Update error data
+    errorData.attempts++;
+    errorData.lastAttempt = now;
+    errorCooldowns.set(errorKey, errorData);
+    
+    return true;
+}
+
+// Reset error cooldown for a specific key
+function resetErrorCooldown(errorKey) {
+    errorCooldowns.delete(errorKey);
+    console.log(`✅ Reset error cooldown for: ${errorKey}`);
+}
+
 // Generate Random Code - FIXED: Proper code generation
 function generateCode(prefix = '', length = 8) {
     try {
@@ -614,7 +650,11 @@ bot.on('chat_join_request', async (ctx) => {
     try {
         const userId = ctx.chatJoinRequest.from.id;
         const chatId = ctx.chatJoinRequest.chat.id;
-        
+      const errorKey = `join_request_${userId}_${chatId}`;
+        if (!canProcessError(errorKey, 2, 60000)) { // 2 attempts, 60 second cooldown
+            console.log(`⏸️ Skipping join request due to error cooldown: ${errorKey}`);
+            return;
+        }
         console.log(`📨 Join request from user ${userId} for chat ${chatId}`);
         
         // Get config to check settings
@@ -704,21 +744,20 @@ bot.on('chat_join_request', async (ctx) => {
                                     console.log(`✅ User ${userId} has joined all channels`);
                                 }
                             }
-                        } catch (error) {
-                            console.error('Error checking user status after approval:', error);
-                        }
-                    }, 2000);
-                    
-                                } catch (error) {
+                                        } catch (error) {
                     console.error(`❌ Failed to approve join request for user ${userId}:`, error.message);
                     
                     // Check if error is "USER_ALREADY_PARTICIPANT" - this is not a real error
                     if (error.message.includes('USER_ALREADY_PARTICIPANT')) {
                         console.log(`✅ User ${userId} is already a member of "${channel.title}"`);
-                        // Don't notify admin for this non-error
+                        // Reset cooldown for this non-error
+                        resetErrorCooldown(errorKey);
                     } else {
-                        // Only notify admin for real errors
-                        await notifyAdmin(`❌ <b>Join Request Failed</b>\n\n👤 User: ${userId}\n📺 Channel: ${channel.title}\n❌ Error: ${error.message}`);
+                        // Only notify admin for real errors (and only if not in cooldown)
+                        const canNotify = canProcessError(`notify_${errorKey}`, 1, 300000); // Notify only once every 5 minutes
+                        if (canNotify) {
+                            await notifyAdmin(`❌ <b>Join Request Failed</b>\n\n👤 User: ${userId}\n📺 Channel: ${channel.title}\n❌ Error: ${error.message}\n\n⚠️ Will retry up to 2 times`);
+                        }
                     }
                 }
                 
