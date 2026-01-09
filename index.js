@@ -127,24 +127,25 @@ async function initBot() {
         if (!config) {
             // Create new config
             await db.collection('admin').insertOne({
-                type: 'config',
-                admins: ADMIN_IDS,
-                startImage: DEFAULT_CONFIG.startImage,
-                startMessage: DEFAULT_CONFIG.startMessage,
-                menuImage: DEFAULT_CONFIG.menuImage,
-                menuMessage: DEFAULT_CONFIG.menuMessage,
-                codeTimer: DEFAULT_CONFIG.codeTimer,
-                channels: [],
-                apps: [],
-                uploadedImages: [],
-                imageOverlaySettings: {
-                    startImage: true,
-                    menuImage: true,
-                    appImages: true
-                },
-                createdAt: new Date(),
-                updatedAt: new Date()
-            });
+    type: 'config',
+    admins: ADMIN_IDS,
+    startImage: DEFAULT_CONFIG.startImage,
+    startMessage: DEFAULT_CONFIG.startMessage,
+    menuImage: DEFAULT_CONFIG.menuImage,
+    menuMessage: DEFAULT_CONFIG.menuMessage,
+    codeTimer: DEFAULT_CONFIG.codeTimer,
+    showContactButton: true, // NEW: Default is true (show contact button)
+    channels: [],
+    apps: [],
+    uploadedImages: [],
+    imageOverlaySettings: {
+        startImage: true,
+        menuImage: true,
+        appImages: true
+    },
+    createdAt: new Date(),
+    updatedAt: new Date()
+});
             console.log('✅ Created new bot configuration');
         } else {
             console.log('✅ Loaded existing bot configuration');
@@ -694,8 +695,13 @@ async function showStartScreen(ctx) {
             buttons.push([{ text: '🎮 Go to Menu', callback_data: 'go_to_menu' }]);
         }
         
-        // Add contact admin button
-        buttons.push([{ text: '📞 Contact Admin', callback_data: 'contact_admin' }]);
+        // Add contact admin button if enabled
+const configForContact = await db.collection('admin').findOne({ type: 'config' });
+const showContactButton = configForContact?.showContactButton !== false; // Default true
+
+if (showContactButton) {
+    buttons.push([{ text: '📞 Contact Admin', callback_data: 'contact_admin' }]);
+}
         
         await ctx.replyWithPhoto(startImage, {
             caption: startMessage,
@@ -874,8 +880,13 @@ async function showMainMenu(ctx) {
         // Add back button
         keyboard.push([{ text: '🔙 Back to Start', callback_data: 'back_to_start' }]);
         
-        // Add contact admin button
-        keyboard.push([{ text: '📞 Contact Admin', callback_data: 'contact_admin' }]);
+        // Add contact admin button if enabled
+const configForContact = await db.collection('admin').findOne({ type: 'config' });
+const showContactButton = configForContact?.showContactButton !== false; // Default true
+
+if (showContactButton) {
+    keyboard.push([{ text: '📞 Contact Admin', callback_data: 'contact_admin' }]);
+}
         
         await ctx.replyWithPhoto(menuImage, {
             caption: menuMessage,
@@ -1088,14 +1099,14 @@ async function showAdminPanel(ctx) {
     try {
         const text = '👮‍♂️ <b>Admin Control Panel</b>\n\nSelect an option below:';
         const keyboard = [
-            [{ text: '📢 Broadcast', callback_data: 'admin_broadcast' }, { text: '👥 User Stats', callback_data: 'admin_userstats' }],
-            [{ text: '🖼️ Start Image', callback_data: 'admin_startimage' }, { text: '📝 Start Message', callback_data: 'admin_startmessage' }],
-            [{ text: '🖼️ Menu Image', callback_data: 'admin_menuimage' }, { text: '📝 Menu Message', callback_data: 'admin_menumessage' }],
-            [{ text: '⏰ Code Timer', callback_data: 'admin_timer' }, { text: '📺 Manage Channels', callback_data: 'admin_channels' }],
-            [{ text: '📱 Manage Apps', callback_data: 'admin_apps' }, { text: '👑 Manage Admins', callback_data: 'admin_manage_admins' }],
-            [{ text: '⚙️ Image Overlay Settings', callback_data: 'admin_image_overlay' }, { text: '🗑️ Delete Data', callback_data: 'admin_deletedata' }],
-            [{ text: '🖼️ Manage Images', callback_data: 'admin_manage_images' }]
-        ];
+    [{ text: '📢Broadcast', callback_data: 'admin_broadcast' }, { text: '👥User Stats', callback_data: 'admin_userstats' }],
+    [{ text: '🖼️Start Image', callback_data: 'admin_startimage' }, { text: '📝Start Message', callback_data: 'admin_startmessage' }],
+    [{ text: '🖼️Menu Image', callback_data: 'admin_menuimage' }, { text: '📝Menu Message', callback_data: 'admin_menumessage' }],
+    [{ text: '⏰Code Timer', callback_data: 'admin_timer' }, { text: '📺Manage Channels', callback_data: 'admin_channels' }],
+    [{ text: '📱Manage Apps', callback_data: 'admin_apps' }, { text: '👑Manage Admins', callback_data: 'admin_manage_admins' }],
+    [{ text: '⚙️Image Overlay', callback_data: 'admin_image_overlay' }, { text: '📞Contact Button', callback_data: 'admin_contact_button' }],
+    [{ text: '🖼️Manage Images', callback_data: 'admin_manage_images' }, { text: '🗑️Delete Data', callback_data: 'admin_deletedata' }]
+];
         
         if (ctx.callbackQuery) {
             await safeEditMessage(ctx, text, {
@@ -2177,6 +2188,80 @@ bot.action('toggle_app_overlay', async (ctx) => {
         await bot.action('admin_image_overlay')(ctx);
     } catch (error) {
         console.error('Toggle app overlay error:', error);
+        await ctx.answerCbQuery('❌ Failed to update setting');
+    }
+});
+
+// ==========================================
+// ADMIN FEATURES - CONTACT BUTTON TOGGLE
+// ==========================================
+
+bot.action('admin_contact_button', async (ctx) => {
+    if (!await isAdmin(ctx.from.id)) return;
+    
+    try {
+        const config = await db.collection('admin').findOne({ type: 'config' });
+        const showContactButton = config?.showContactButton !== false; // Default is true (show)
+        
+        const text = `<b>📞 Contact Button Settings</b>\n\nCurrent status: ${showContactButton ? '✅ SHOWN to users' : '❌ HIDDEN from users'}\n\nSelect an option:`;
+        
+        const keyboard = [
+            [
+                { text: showContactButton ? '✅ Currently Shown' : '❌ Currently Hidden', callback_data: 'toggle_contact_button' }
+            ],
+            [
+                { text: showContactButton ? '❌ Hide from Users' : '✅ Show to Users', callback_data: 'set_contact_button' }
+            ],
+            [{ text: '🔙 Back', callback_data: 'admin_back' }]
+        ];
+        
+        await safeEditMessage(ctx, text, {
+            reply_markup: { inline_keyboard: keyboard }
+        });
+    } catch (error) {
+        console.error('Contact button menu error:', error);
+        await safeSendMessage(ctx, '❌ An error occurred.');
+    }
+});
+
+// Toggle contact button
+bot.action('toggle_contact_button', async (ctx) => {
+    try {
+        const config = await db.collection('admin').findOne({ type: 'config' });
+        const currentSetting = config?.showContactButton !== false; // Default true
+        
+        const newSetting = !currentSetting;
+        
+        await db.collection('admin').updateOne(
+            { type: 'config' },
+            { $set: { showContactButton: newSetting, updatedAt: new Date() } }
+        );
+        
+        await ctx.answerCbQuery(`✅ Contact button ${newSetting ? 'shown' : 'hidden'} to users`);
+        await bot.action('admin_contact_button')(ctx);
+    } catch (error) {
+        console.error('Toggle contact button error:', error);
+        await ctx.answerCbQuery('❌ Failed to update setting');
+    }
+});
+
+// Set contact button directly
+bot.action('set_contact_button', async (ctx) => {
+    try {
+        const config = await db.collection('admin').findOne({ type: 'config' });
+        const currentSetting = config?.showContactButton !== false; // Default true
+        
+        const newSetting = !currentSetting;
+        
+        await db.collection('admin').updateOne(
+            { type: 'config' },
+            { $set: { showContactButton: newSetting, updatedAt: new Date() } }
+        );
+        
+        await ctx.answerCbQuery(`✅ Contact button ${newSetting ? 'shown' : 'hidden'} to users`);
+        await bot.action('admin_contact_button')(ctx);
+    } catch (error) {
+        console.error('Set contact button error:', error);
         await ctx.answerCbQuery('❌ Failed to update setting');
     }
 });
