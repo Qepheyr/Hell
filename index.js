@@ -312,6 +312,7 @@ async function isAdmin(userId) {
 
 // Get Unjoined Channels - FIXED: Handle private channels with join requests
 // Get Unjoined Channels - FIXED: Handle private channels with join requests
+// Get Unjoined Channels - FIXED: Handle private channels with join requests
 async function getUnjoinedChannels(userId) {
     try {
         const config = await db.collection('admin').findOne({ type: 'config' });
@@ -348,6 +349,44 @@ async function getUnjoinedChannels(userId) {
         return unjoined;
     } catch (error) {
         console.error('Error in getUnjoinedChannels:', error);
+        return [];
+    }
+}
+
+// ==========================================
+// NEW FUNCTION: Get Channels to Display in Start Screen
+// ==========================================
+
+// Get Channels to Display in Start Screen - Shows ALL channels (including optional ones)
+async function getChannelsToDisplay(userId) {
+    try {
+        const config = await db.collection('admin').findOne({ type: 'config' });
+        if (!config || !config.channels || config.channels.length === 0) return [];
+        
+        const channelsToDisplay = [];
+        
+        for (const channel of config.channels) {
+            // Check if user has already joined this channel
+            let userHasJoined = false;
+            
+            try {
+                const member = await bot.telegram.getChatMember(channel.id, userId);
+                if (member.status !== 'left' && member.status !== 'kicked') {
+                    userHasJoined = true;
+                }
+            } catch (error) {
+                // Can't check membership
+            }
+            
+            // Only add to display if user hasn't joined yet
+            if (!userHasJoined) {
+                channelsToDisplay.push(channel);
+            }
+        }
+        
+        return channelsToDisplay;
+    } catch (error) {
+        console.error('Error in getChannelsToDisplay:', error);
         return [];
     }
 }
@@ -709,8 +748,8 @@ async function showStartScreen(ctx) {
         const user = ctx.from;
         const userId = user.id;
         
-        // Get unjoined channels
-        const unjoinedChannels = await getUnjoinedChannels(userId);
+        // Get channels to display (shows ALL channels user hasn't joined yet)
+        const channelsToDisplay = await getChannelsToDisplay(userId);
         
         // Get configuration
         const config = await db.collection('admin').findOne({ type: 'config' });
@@ -728,13 +767,27 @@ async function showStartScreen(ctx) {
         
         // Create buttons
         const buttons = [];
-        
-        // Add channel buttons if there are unjoined channels
-        if (unjoinedChannels.length > 0) {
-            unjoinedChannels.forEach(channel => {
-                const buttonText = channel.buttonLabel || `Join ${channel.title}`;
-                buttons.push([{ text: buttonText, url: channel.link }]);
-            });
+
+        // Add channel buttons if there are channels to display (2 per row)
+        if (channelsToDisplay.length > 0) {
+            // Group channels 2 per row
+            for (let i = 0; i < channelsToDisplay.length; i += 2) {
+                const row = [];
+                
+                // First channel in row
+                const channel1 = channelsToDisplay[i];
+                const buttonText1 = channel1.buttonLabel || `Join ${channel1.title}`;
+                row.push({ text: buttonText1, url: channel1.link });
+                
+                // Second channel in row if exists
+                if (i + 1 < channelsToDisplay.length) {
+                    const channel2 = channelsToDisplay[i + 1];
+                    const buttonText2 = channel2.buttonLabel || `Join ${channel2.title}`;
+                    row.push({ text: buttonText2, url: channel2.link });
+                }
+                
+                buttons.push(row);
+            }
             
             // Add verify button
             buttons.push([{ text: '✅ Check Joined', callback_data: 'check_joined' }]);
