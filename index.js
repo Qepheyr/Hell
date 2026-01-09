@@ -5260,22 +5260,6 @@ async function startBot() {
     }
 }
 
-// Handle Railway port binding
-const PORT = process.env.PORT || 3000;
-if (process.env.NODE_ENV === 'production') {
-    const express = require('express');
-    const app = express();
-    
-    app.get('/', (req, res) => {
-        res.send('Telegram Bot is running!');
-    });
-    
-    app.listen(PORT, () => {
-        console.log(`🚀 Server running on port ${PORT}`);
-        startBot();
-    });
-} else {
-    startBot();
-}
-
+// Handle Railway port bin
+      startBot();
 console.log('Bot Starting...');
