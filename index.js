@@ -311,6 +311,7 @@ async function isAdmin(userId) {
 }
 
 // Get Unjoined Channels - FIXED: Handle private channels with join requests
+// Get Unjoined Channels - FIXED: Handle private channels with join requests
 async function getUnjoinedChannels(userId) {
     try {
         const config = await db.collection('admin').findOne({ type: 'config' });
@@ -319,6 +320,18 @@ async function getUnjoinedChannels(userId) {
         const unjoined = [];
         
         for (const channel of config.channels) {
+            // Check if this is a private channel with auto-accept disabled
+            if (channel.type === 'private') {
+                // Check auto-accept setting (default is true)
+                const channelAutoAccept = channel.autoAccept !== false; // Default true
+                
+                // If auto-accept is disabled for this private channel, SKIP verification for this channel
+                if (!channelAutoAccept) {
+                    console.log(`📋 Skipping verification for private channel "${channel.title}" (Auto-accept disabled)`);
+                    continue; // Skip this channel from verification
+                }
+            }
+            
             try {
                 // Try to get member status
                 const member = await bot.telegram.getChatMember(channel.id, userId);
