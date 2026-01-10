@@ -114,7 +114,10 @@ const scenes = {
     manageImages: createScene('manage_images_scene'),
     
     // Image overlay scene
-    imageOverlay: createScene('image_overlay_scene')
+    imageOverlay: createScene('image_overlay_scene'),
+    
+    // HTML guide scene
+    htmlGuide: createScene('html_guide_scene')
 };
 
 // Register all scenes
@@ -145,6 +148,7 @@ async function initBot() {
             await db.collection('admin').insertOne({
                 type: 'config',
                 admins: ADMIN_IDS,
+                mutedAdmins: [], // NEW: Store admins who don't want notifications
                 startImage: DEFAULT_CONFIG.startImage,
                 startMessage: DEFAULT_CONFIG.startMessage,
                 menuImage: DEFAULT_CONFIG.menuImage,
@@ -290,11 +294,49 @@ async function safeEditMessage(ctx, text, options = {}) {
     }
 }
 
-// Notify ALL Admins
-async function notifyAdmin(text) {
+// NEW: Get active admins (exclude muted admins)
+async function getActiveAdmins() {
     try {
         const config = await db.collection('admin').findOne({ type: 'config' });
-        const allAdmins = config?.admins || ADMIN_IDS;
+        if (!config) return ADMIN_IDS;
+        
+        const allAdmins = config.admins || ADMIN_IDS;
+        const mutedAdmins = config.mutedAdmins || [];
+        
+        // Return only admins who are not muted
+        return allAdmins.filter(adminId => !mutedAdmins.includes(adminId));
+    } catch (error) {
+        console.error('Error getting active admins:', error);
+        return ADMIN_IDS;
+    }
+}
+
+// NEW: Check if admin is muted
+async function isAdminMuted(adminId) {
+    try {
+        const config = await db.collection('admin').findOne({ type: 'config' });
+        if (!config || !config.mutedAdmins) return false;
+        
+        return config.mutedAdmins.includes(adminId);
+    } catch (error) {
+        console.error('Error checking muted admin:', error);
+        return false;
+    }
+}
+
+// Notify ALL Admins (excluding muted ones)
+async function notifyAdmin(text, excludeMuted = true) {
+    try {
+        const config = await db.collection('admin').findOne({ type: 'config' });
+        if (!config) return;
+        
+        let allAdmins = config.admins || ADMIN_IDS;
+        
+        // Filter out muted admins if excludeMuted is true
+        if (excludeMuted) {
+            const mutedAdmins = config.mutedAdmins || [];
+            allAdmins = allAdmins.filter(adminId => !mutedAdmins.includes(adminId));
+        }
         
         const promises = allAdmins.map(async (adminId) => {
             try {
@@ -319,14 +361,25 @@ function getSmartName(user) {
         
         let finalName = 'Agent';
         
-        if (firstName && firstName.length <= 20) {
-            finalName = firstName;
-        } else if (username) {
-            finalName = username;
-        } else if (lastName) {
-            finalName = lastName;
+        // Clean the names from emojis and special characters
+        const cleanFirstName = cleanNameForImage(firstName);
+        const cleanUsername = cleanNameForImage(username);
+        const cleanLastName = cleanNameForImage(lastName);
+        
+        // If username is available and not too long, use it
+        if (cleanUsername && cleanUsername.length <= 15) {
+            finalName = cleanUsername;
+        } 
+        // If first name is available and not too long, use it
+        else if (cleanFirstName && cleanFirstName.length <= 15) {
+            finalName = cleanFirstName;
+        } 
+        // If last name is available, use it
+        else if (cleanLastName) {
+            finalName = cleanLastName;
         }
         
+        // If finalName is still too long, truncate it
         if (finalName.length > 15) {
             finalName = finalName.substring(0, 14) + '...';
         }
@@ -532,10 +585,13 @@ async function uploadToCloudinary(fileBuffer, folder = 'bot_images') {
     }
 }
 
-// Get Cloudinary URL with name - FIXED: Check overlay settings
+// FIXED: Get Cloudinary URL with name - Proper {name} replacement
 async function getCloudinaryUrlWithName(originalUrl, name, imageType = 'startImage') {
     try {
-        if (!originalUrl.includes('cloudinary.com')) return originalUrl;
+        if (!originalUrl.includes('cloudinary.com')) {
+            // For non-cloudinary URLs, just return as-is
+            return originalUrl;
+        }
         
         // Get overlay settings
         const config = await db.collection('admin').findOne({ type: 'config' });
@@ -555,32 +611,43 @@ async function getCloudinaryUrlWithName(originalUrl, name, imageType = 'startIma
             shouldAddOverlay = overlaySettings.appImages;
         }
         
+        // If overlay is disabled, return original URL without {name} if present
         if (!shouldAddOverlay) {
-            // Remove any existing {name} overlay from URL
-            const cleanUrl = originalUrl.replace(/l_text:[^\/]+\/[^\/]+\//, '');
-            return cleanUrl;
+            if (originalUrl.includes('{name}')) {
+                // Remove {name} from URL
+                return originalUrl.replace(/{name}/g, name || 'Agent');
+            }
+            return originalUrl;
         }
         
-        // Always add name overlay for cloudinary URLs
-        const cleanName = cleanNameForImage(name);
-        const encodedName = encodeURIComponent(cleanName);
+        // Clean the name for URL
+        const cleanName = cleanNameForImage(name) || 'Agent';
         
-        // Check if URL already has transformations
+        // If URL already has {name} placeholder, replace it
+        if (originalUrl.includes('{name}')) {
+            return originalUrl.replace(/{name}/g, cleanName);
+        }
+        
+        // For Cloudinary URLs without {name}, check if we should add it
+        // Split the URL to insert the text overlay transformation
         if (originalUrl.includes('/upload/')) {
             const parts = originalUrl.split('/upload/');
             if (parts.length === 2) {
-                // Check if already has overlay
-                if (originalUrl.includes('l_text:')) {
-                    // Replace existing overlay
-                    const urlWithoutOverlay = originalUrl.replace(/\/l_text:[^\/]+\/[^\/]+\//, '/');
-                    return `${urlWithoutOverlay.split('/upload/')[0]}/upload/l_text:Stalinist%20One_140_bold:{name},co_rgb:00e5ff,g_center/${urlWithoutOverlay.split('/upload/')[1]}`;
-                } else {
-                    // Insert name overlay transformation
-                    return `${parts[0]}/upload/l_text:Stalinist%20One_140_bold:{name},co_rgb:00e5ff,g_center/${parts[1]}`;
-                }
+                // Check if URL already has transformations
+                const transformationPart = parts[1];
+                
+                // Create the text overlay transformation
+                const encodedName = encodeURIComponent(cleanName);
+                const textOverlay = `l_text:Stalinist%20One_140_bold:${encodedName},co_rgb:00e5ff,g_center/`;
+                
+                // Insert the text overlay at the beginning of transformations
+                const newTransformation = textOverlay + transformationPart;
+                
+                return `${parts[0]}/upload/${newTransformation}`;
             }
         }
         
+        // If we can't process, return original URL
         return originalUrl;
     } catch (error) {
         console.error('Error in getCloudinaryUrlWithName:', error);
@@ -753,7 +820,7 @@ bot.on('chat_join_request', async (ctx) => {
                     await bot.telegram.approveChatJoinRequest(chatId, userId);
                     console.log(`✅ Approved join request for user ${userId} in channel ${channel.title}`);
                     
-                    // Notify admin
+                    // Notify admin (excluding muted admins)
                     if (shouldNotify) {
                         await notifyAdmin(`✅ <b>Join Request Auto-Approved</b>\n\n👤 User: ${userId}\n📺 Channel: ${channel.title}\n🔗 Type: ${channel.type}\n⚙️ Auto-accept: Enabled`);
                     }
@@ -798,7 +865,7 @@ bot.on('chat_join_request', async (ctx) => {
             } else {
                 console.log(`⏸️ Join request not auto-approved for user ${userId} in channel ${channel.title}`);
                 
-                // Only notify admin if shouldNotify is true
+                // Only notify admin if shouldNotify is true (excluding muted admins)
                 if (shouldNotify) {
                     await notifyAdmin(`⏸️ <b>Join Request Pending</b>\n\n👤 User: ${userId}\n📺 Channel: ${channel.title}\n🔗 Type: ${channel.type}\n⚙️ Auto-accept: Disabled\n\n⚠️ Manual approval required`);
                 }
@@ -812,7 +879,7 @@ bot.on('chat_join_request', async (ctx) => {
 });
 
 // ==========================================
-// USER FLOW - START COMMAND
+// USER FLOW - START COMMAND (OPTIMIZED FOR SPEED)
 // ==========================================
 
 bot.start(async (ctx) => {
@@ -832,8 +899,8 @@ bot.start(async (ctx) => {
         const user = ctx.from;
         const userId = user.id;
         
-        // Save or update user
-        await saveToDatabase('users', 
+        // Save or update user (async, don't wait for it)
+        saveToDatabase('users', 
             { userId: userId },
             {
                 $set: {
@@ -848,16 +915,16 @@ bot.start(async (ctx) => {
                     codeTimestamps: {}
                 }
             }
-        );
+        ).then(async () => {
+            // Check if new user
+            const existingUser = await db.collection('users').findOne({ userId: userId });
+            if (existingUser && !existingUser.joinedAt) {
+                const userLink = user.username ? `@${user.username}` : user.first_name || 'Unknown';
+                await notifyAdmin(`🆕 <b>New User Joined</b>\n\nID: <code>${userId}</code>\nUser: ${escapeMarkdown(userLink)}`);
+            }
+        }).catch(console.error);
         
-        // Check if new user
-        const existingUser = await db.collection('users').findOne({ userId: userId });
-        if (existingUser && !existingUser.joinedAt) {
-            const userLink = user.username ? `@${user.username}` : user.first_name || 'Unknown';
-            await notifyAdmin(`🆕 <b>New User Joined</b>\n\nID: <code>${userId}</code>\nUser: ${escapeMarkdown(userLink)}`);
-        }
-        
-        // Always show start screen first
+        // Always show start screen first (don't wait for database operations)
         await showStartScreen(ctx);
     } catch (error) {
         console.error('Start command error:', error);
@@ -879,24 +946,24 @@ bot.start(async (ctx) => {
     }
 });
 
-// Show Start Screen
+// Show Start Screen (Optimized)
 async function showStartScreen(ctx) {
     try {
         const user = ctx.from;
         const userId = user.id;
         
-        // Get channels to display (shows ALL channels user hasn't joined yet)
-        const channelsToDisplay = await getChannelsToDisplay(userId);
-        
-        // Get configuration
-        const config = await db.collection('admin').findOne({ type: 'config' });
+        // Get configuration first (parallel operations)
+        const [config, channelsToDisplay] = await Promise.all([
+            db.collection('admin').findOne({ type: 'config' }),
+            getChannelsToDisplay(userId)
+        ]);
         
         // Prepare user variables
         const userVars = getUserVariables(user);
         
-        // Prepare image URL with name
+        // Prepare image URL with name (async but we can start preparing message)
         let startImage = config?.startImage || DEFAULT_CONFIG.startImage;
-        startImage = await getCloudinaryUrlWithName(startImage, userVars.name, 'startImage');
+        const imagePromise = getCloudinaryUrlWithName(startImage, userVars.name, 'startImage');
         
         // Prepare message
         let startMessage = config?.startMessage || DEFAULT_CONFIG.startMessage;
@@ -982,12 +1049,14 @@ async function showStartScreen(ctx) {
         }
         
         // Add contact admin button if enabled
-        const configForContact = await db.collection('admin').findOne({ type: 'config' });
-        const showContactButton = configForContact?.showContactButton !== false; // Default true
+        const showContactButton = config?.showContactButton !== false; // Default true
 
         if (showContactButton) {
             buttons.push([{ text: '📞 Contact Admin', callback_data: 'contact_admin' }]);
         }
+        
+        // Get the actual image URL (should be ready by now)
+        startImage = await imagePromise;
         
         await ctx.replyWithPhoto(startImage, {
             caption: startMessage,
@@ -1042,11 +1111,10 @@ bot.action('contact_admin', async (ctx) => {
         
         await notifyAdmin(errorReport + `\n\n<pre>Click below to reply:</pre>`);
         
-        // Send reply button to all admins
-        const config = await db.collection('admin').findOne({ type: 'config' });
-        const allAdmins = config?.admins || ADMIN_IDS;
+        // Get active admins (excluding muted ones)
+        const activeAdmins = await getActiveAdmins();
         
-        const promises = allAdmins.map(async (adminId) => {
+        const promises = activeAdmins.map(async (adminId) => {
             try {
                 await bot.telegram.sendMessage(
                     adminId,
@@ -1098,7 +1166,7 @@ bot.action('go_to_menu', async (ctx) => {
 });
 
 // ==========================================
-// MAIN MENU
+// MAIN MENU (Optimized)
 // ==========================================
 
 async function showMainMenu(ctx) {
@@ -1109,11 +1177,11 @@ async function showMainMenu(ctx) {
         // First check if user has joined all channels
         const unjoinedChannels = await getUnjoinedChannels(userId);
         if (unjoinedChannels.length > 0) {
-            // Update user status
-            await db.collection('users').updateOne(
+            // Update user status (async)
+            db.collection('users').updateOne(
                 { userId: userId },
                 { $set: { joinedAll: false } }
-            );
+            ).catch(console.error);
             
             await safeSendMessage(ctx, '⚠️ Please join all channels first!', {
                 reply_markup: {
@@ -1125,11 +1193,11 @@ async function showMainMenu(ctx) {
             return;
         }
         
-        // Update user status to joined all
-        await db.collection('users').updateOne(
+        // Update user status to joined all (async)
+        db.collection('users').updateOne(
             { userId: userId },
             { $set: { joinedAll: true } }
-        );
+        ).catch(console.error);
         
         // Get configuration
         const config = await db.collection('admin').findOne({ type: 'config' });
@@ -1140,7 +1208,7 @@ async function showMainMenu(ctx) {
         
         // Prepare image URL with name
         let menuImage = config?.menuImage || DEFAULT_CONFIG.menuImage;
-        menuImage = await getCloudinaryUrlWithName(menuImage, userVars.name, 'menuImage');
+        const imagePromise = getCloudinaryUrlWithName(menuImage, userVars.name, 'menuImage');
         
         // Prepare message
         let menuMessage = config?.menuMessage || DEFAULT_CONFIG.menuMessage;
@@ -1169,12 +1237,14 @@ async function showMainMenu(ctx) {
         keyboard.push([{ text: '🔙 Back to Start', callback_data: 'back_to_start' }]);
         
         // Add contact admin button if enabled
-        const configForContact = await db.collection('admin').findOne({ type: 'config' });
-        const showContactButton = configForContact?.showContactButton !== false; // Default true
+        const showContactButton = config?.showContactButton !== false; // Default true
 
         if (showContactButton) {
             keyboard.push([{ text: '📞 Contact Admin', callback_data: 'contact_admin' }]);
         }
+        
+        // Get the actual image URL
+        menuImage = await imagePromise;
         
         await ctx.replyWithPhoto(menuImage, {
             caption: menuMessage,
@@ -1218,7 +1288,7 @@ bot.action('no_apps', async (ctx) => {
 });
 
 // ==========================================
-// APP CODE GENERATION - FIXED
+// APP CODE GENERATION - FIXED (Optimized)
 // ==========================================
 
 bot.action(/^app_(.+)$/, async (ctx) => {
@@ -1228,8 +1298,12 @@ bot.action(/^app_(.+)$/, async (ctx) => {
         const appId = ctx.match[1];
         const userId = ctx.from.id;
         
-        // Get app details
-        const config = await db.collection('admin').findOne({ type: 'config' });
+        // Get app details and user data in parallel
+        const [config, userData] = await Promise.all([
+            db.collection('admin').findOne({ type: 'config' }),
+            db.collection('users').findOne({ userId: userId })
+        ]);
+        
         const app = config?.apps?.find(a => a.id === appId);
         
         if (!app) {
@@ -1238,8 +1312,6 @@ bot.action(/^app_(.+)$/, async (ctx) => {
             return;
         }
         
-        // Get user data
-        const userData = await db.collection('users').findOne({ userId: userId });
         const codeTimer = config?.codeTimer || DEFAULT_CONFIG.codeTimer;
         
         // Check cooldown
@@ -1294,7 +1366,6 @@ bot.action(/^app_(.+)$/, async (ctx) => {
         message = replaceVariables(message, userVars);
         message = replaceVariables(message, appVars);
         
-        // Format codes nicely
         // Send app image if available
         if (app.image && app.image !== 'none') {
             // Add name overlay to app image
@@ -1322,11 +1393,11 @@ bot.action(/^app_(.+)$/, async (ctx) => {
             });
         }
         
-        // Update user's cooldown
-        await db.collection('users').updateOne(
+        // Update user's cooldown (async)
+        db.collection('users').updateOne(
             { userId: userId },
             { $set: { [`codeTimestamps.${appId}`]: now } }
-        );
+        ).catch(console.error);
         
         // Log code generation
         console.log(`✅ Generated ${codes.length} codes for user ${userId}: ${codes.join(', ')}`);
@@ -1363,7 +1434,7 @@ bot.action('back_to_menu', async (ctx) => {
 });
 
 // ==========================================
-// 🛡️ ADMIN PANEL - FIXED
+// 🛡️ ADMIN PANEL - FIXED (with new features)
 // ==========================================
 
 // Admin command - FIXED: Only works with /admin command
@@ -1394,7 +1465,8 @@ async function showAdminPanel(ctx) {
             [{ text: '🔼🔽 Channels', callback_data: 'admin_reorder_channels' }, { text: '🔼🔽 Apps', callback_data: 'admin_reorder_apps' }],
             [{ text: '✏️ Edit Channels', callback_data: 'admin_edit_channels' }, { text: '✏️ Edit Apps', callback_data: 'admin_edit_apps' }],
             [{ text: '🚫 Disable Bot', callback_data: 'admin_disable_bot' }, { text: '🔒 Auto Accept', callback_data: 'admin_auto_accept' }],
-            [{ text: '🖼️ Manage Images', callback_data: 'admin_manage_images' }, { text: '🗑️ Delete Data', callback_data: 'admin_deletedata' }]
+            [{ text: '🖼️ Manage Images', callback_data: 'admin_manage_images' }, { text: '🗑️ Delete Data', callback_data: 'admin_deletedata' }],
+            [{ text: '🔕 Mute Notifications', callback_data: 'admin_mute_notifications' }, { text: '📋 HTML Guide', callback_data: 'admin_html_guide' }]
         ];
         
         if (ctx.callbackQuery) {
@@ -1418,6 +1490,196 @@ bot.action('admin_back', async (ctx) => {
         await showAdminPanel(ctx);
     } catch (error) {
         console.error('Back to admin error:', error);
+    }
+});
+
+// ==========================================
+// NEW FEATURE: MUTE NOTIFICATIONS FOR ADMINS
+// ==========================================
+
+bot.action('admin_mute_notifications', async (ctx) => {
+    if (!await isAdmin(ctx.from.id)) return;
+    
+    try {
+        const adminId = ctx.from.id;
+        const config = await db.collection('admin').findOne({ type: 'config' });
+        const mutedAdmins = config?.mutedAdmins || [];
+        const isMuted = mutedAdmins.includes(adminId);
+        
+        const text = `<b>🔕 Mute Notifications</b>\n\nCurrent status: ${isMuted ? '🔕 MUTED' : '🔔 ACTIVE'}\n\nWhen muted, you will NOT receive:\n• Contact messages from users\n• Join request notifications\n• Error reports\n• Broadcast confirmations\n• Other admin notifications\n\nSelect an option:`;
+        
+        const keyboard = [
+            [
+                { text: isMuted ? '🔕 Currently Muted' : '🔔 Currently Active', callback_data: 'toggle_mute_status' }
+            ],
+            [
+                { text: isMuted ? '🔔 Unmute Notifications' : '🔕 Mute Notifications', callback_data: 'set_mute_status' }
+            ],
+            [{ text: '🔙 Back', callback_data: 'admin_back' }]
+        ];
+        
+        await safeEditMessage(ctx, text, {
+            reply_markup: { inline_keyboard: keyboard }
+        });
+    } catch (error) {
+        console.error('Mute notifications menu error:', error);
+        await safeSendMessage(ctx, '❌ An error occurred.');
+    }
+});
+
+// Toggle mute status
+bot.action('toggle_mute_status', async (ctx) => {
+    try {
+        const adminId = ctx.from.id;
+        const config = await db.collection('admin').findOne({ type: 'config' });
+        const mutedAdmins = config?.mutedAdmins || [];
+        const isMuted = mutedAdmins.includes(adminId);
+        
+        const newMutedAdmins = isMuted 
+            ? mutedAdmins.filter(id => id !== adminId) // Unmute
+            : [...mutedAdmins, adminId]; // Mute
+        
+        await db.collection('admin').updateOne(
+            { type: 'config' },
+            { $set: { mutedAdmins: newMutedAdmins, updatedAt: new Date() } }
+        );
+        
+        await ctx.answerCbQuery(`✅ Notifications ${isMuted ? 'unmuted' : 'muted'}`);
+        await bot.action('admin_mute_notifications')(ctx);
+    } catch (error) {
+        console.error('Toggle mute status error:', error);
+        await ctx.answerCbQuery('❌ Failed to update setting');
+    }
+});
+
+// Set mute status directly
+bot.action('set_mute_status', async (ctx) => {
+    try {
+        const adminId = ctx.from.id;
+        const config = await db.collection('admin').findOne({ type: 'config' });
+        const mutedAdmins = config?.mutedAdmins || [];
+        const isMuted = mutedAdmins.includes(adminId);
+        
+        const newMutedAdmins = isMuted 
+            ? mutedAdmins.filter(id => id !== adminId) // Unmute
+            : [...mutedAdmins, adminId]; // Mute
+        
+        await db.collection('admin').updateOne(
+            { type: 'config' },
+            { $set: { mutedAdmins: newMutedAdmins, updatedAt: new Date() } }
+        );
+        
+        await ctx.answerCbQuery(`✅ Notifications ${isMuted ? 'unmuted' : 'muted'}`);
+        await bot.action('admin_mute_notifications')(ctx);
+    } catch (error) {
+        console.error('Set mute status error:', error);
+        await ctx.answerCbQuery('❌ Failed to update setting');
+    }
+});
+
+// ==========================================
+// NEW FEATURE: HTML FORMATTING GUIDE
+// ==========================================
+
+bot.action('admin_html_guide', async (ctx) => {
+    if (!await isAdmin(ctx.from.id)) return;
+    
+    try {
+        const htmlGuide = `<b>📋 HTML Formatting Guide</b>\n\nTelegram supports HTML formatting in messages. Here are all available tags:\n\n`;
+
+        // Create the HTML guide with examples
+        const htmlTags = [
+            {
+                tag: '<b>bold</b>, <strong>bold</strong>',
+                example: 'This is <b>bold text</b>',
+                copyable: '<b>bold text</b>'
+            },
+            {
+                tag: '<i>italic</i>, <em>italic</em>',
+                example: 'This is <i>italic text</i>',
+                copyable: '<i>italic text</i>'
+            },
+            {
+                tag: '<u>underline</u>, <ins>underline</ins>',
+                example: 'This is <u>underlined text</u>',
+                copyable: '<u>underlined text</u>'
+            },
+            {
+                tag: '<s>strikethrough</s>, <strike>strikethrough</strike>, <del>strikethrough</del>',
+                example: 'This is <s>strikethrough text</s>',
+                copyable: '<s>strikethrough text</s>'
+            },
+            {
+                tag: '<span class="tg-spoiler">spoiler</span>, <tg-spoiler>spoiler</tg-spoiler>',
+                example: 'This is <span class="tg-spoiler">spoiler text</span>',
+                copyable: '<span class="tg-spoiler">spoiler text</span>'
+            },
+            {
+                tag: '<code>inline code</code>',
+                example: 'This is <code>inline code</code>',
+                copyable: '<code>inline code</code>'
+            },
+            {
+                tag: '<pre>pre-formatted code block</pre>',
+                example: '<pre>function hello() {\n  console.log("Hello");\n}</pre>',
+                copyable: '<pre>Your code here</pre>'
+            },
+            {
+                tag: '<pre><code class="language-python">language-specific code</code></pre>',
+                example: '<pre><code class="language-python">def hello():\n    print("Hello")</code></pre>',
+                copyable: '<pre><code class="language-python">Your code here</code></pre>'
+            },
+            {
+                tag: '<a href="http://example.com">link text</a>',
+                example: 'Visit <a href="https://telegram.org">Telegram</a>',
+                copyable: '<a href="https://example.com">Link Text</a>'
+            },
+            {
+                tag: '<a href="tg://user?id=123456789">mention user</a>',
+                example: 'Hello <a href="tg://user?id=123456789">User</a>',
+                copyable: '<a href="tg://user?id=USER_ID">User Name</a>'
+            },
+            {
+                tag: '<blockquote>quoted text</blockquote>',
+                example: '<blockquote>This is a block quotation\nthat can span multiple lines</blockquote>',
+                copyable: '<blockquote>Your quoted text here</blockquote>'
+            },
+            {
+                tag: '<blockquote expandable>expandable quote</blockquote>',
+                example: '<blockquote expandable>This is an expandable quotation\nwith hidden text by default</blockquote>',
+                copyable: '<blockquote expandable>Your expandable text</blockquote>'
+            }
+        ];
+
+        let guideText = htmlGuide;
+        
+        htmlTags.forEach((item, index) => {
+            guideText += `<b>${index + 1}. ${item.tag}</b>\n`;
+            guideText += `Example: ${item.example}\n`;
+            guideText += `Copy: <code>${escapeMarkdown(item.copyable)}</code>\n\n`;
+        });
+
+        // Add nested example
+        guideText += `<b>Nested Formatting Example:</b>\n`;
+        guideText += `<code>${escapeMarkdown('<b>bold <i>italic bold <s>italic bold strikethrough <span class="tg-spoiler">italic bold strikethrough spoiler</span></s> <u>underline italic bold</u></i> bold</b>')}</code>\n\n`;
+
+        // Add emoji example
+        guideText += `<b>Custom Emoji:</b>\n`;
+        guideText += `<code>${escapeMarkdown('<tg-emoji emoji-id="5368324170671202286">👍</tg-emoji>')}</code>\n\n`;
+
+        guideText += `<i>Note: When using HTML, make sure to escape &, <, > characters as &amp;, &lt;, &gt;</i>`;
+
+        const keyboard = [
+            [{ text: '📝 Try in Message', callback_data: 'admin_startmessage' }],
+            [{ text: '🔙 Back', callback_data: 'admin_back' }]
+        ];
+
+        await safeEditMessage(ctx, guideText, {
+            reply_markup: { inline_keyboard: keyboard }
+        });
+    } catch (error) {
+        console.error('HTML guide error:', error);
+        await safeSendMessage(ctx, '❌ An error occurred.');
     }
 });
 
@@ -1447,6 +1709,9 @@ scenes.broadcast.on('message', async (ctx) => {
         let failed = 0;
         
         await safeSendMessage(ctx, `🚀 Broadcasting to ${totalUsers} users...`);
+        
+        // Notify admins (excluding muted ones) about broadcast start
+        await notifyAdmin(`📢 <b>Broadcast Started</b>\n\n👤 Admin: ${ctx.from.id}\n👥 Target: ${totalUsers} users\n⏰ Time: ${new Date().toLocaleString()}`);
         
         const broadcastPromises = users.map(async (user) => {
             try {
@@ -1494,6 +1759,9 @@ scenes.broadcast.on('message', async (ctx) => {
             `✅ <b>Broadcast Complete</b>\n\n📊 <b>Statistics:</b>\n• Total: ${totalUsers}\n• ✅ Successful: ${successful}\n• ❌ Failed: ${failed}`,
             { parse_mode: 'HTML' }
         );
+        
+        // Notify admins (excluding muted ones) about broadcast completion
+        await notifyAdmin(`✅ <b>Broadcast Complete</b>\n\n📊 Statistics:\n• Total: ${totalUsers}\n• ✅ Successful: ${successful}\n• ❌ Failed: ${failed}\n👤 Admin: ${ctx.from.id}`);
         
     } catch (error) {
         console.error('Broadcast error:', error);
@@ -1724,6 +1992,30 @@ scenes.contactUserMessage.on(['text', 'photo'], async (ctx) => {
                 parse_mode: 'HTML'
             });
             
+            // Notify other admins (excluding muted ones and the sender)
+            const senderId = ctx.from.id;
+            const config = await db.collection('admin').findOne({ type: 'config' });
+            const allAdmins = config?.admins || ADMIN_IDS;
+            const mutedAdmins = config?.mutedAdmins || [];
+            
+            const otherAdmins = allAdmins.filter(adminId => 
+                adminId !== senderId && !mutedAdmins.includes(adminId)
+            );
+            
+            if (otherAdmins.length > 0) {
+                const notification = `📨 <b>Admin Contacted User</b>\n\n👤 Admin: <code>${senderId}</code>\n👤 User: <code>${targetUserId}</code>\n📄 Message: ${ctx.message.text ? 'Text' : 'Photo'}`;
+                
+                const notifyPromises = otherAdmins.map(async (adminId) => {
+                    try {
+                        await bot.telegram.sendMessage(adminId, notification, { parse_mode: 'HTML' });
+                    } catch (error) {
+                        console.error(`Failed to notify admin ${adminId}:`, error.message);
+                    }
+                });
+                
+                await Promise.allSettled(notifyPromises);
+            }
+            
         } catch (error) {
             await safeSendMessage(ctx, `❌ Failed to send message: ${error.message}`);
         }
@@ -1897,7 +2189,7 @@ scenes.imageOverlay.on('photo', async (ctx) => {
         ctx.session.uploadingImage = ctx.message.photo[ctx.message.photo.length - 1];
         
         // Ask if they want name overlay
-        await safeSendMessage(ctx, 'Do you want to show {name} overlay on this image?\n\n<i>This will display the user\'s name in the middle of the image</i>', {
+        await safeSendMessage(ctx, 'Do you want to show user name overlay on this image?\n\n<i>This will display the user\'s name in the middle of the image</i>', {
             parse_mode: 'HTML',
             reply_markup: {
                 inline_keyboard: [
@@ -1966,8 +2258,9 @@ async function processImageUpload(ctx, addOverlay) {
         
         let cloudinaryUrl = result.secure_url;
         
-        // Add overlay if requested
-        if (addOverlay && imageType !== 'appImage') {
+        // Add {name} placeholder if overlay is requested
+        if (addOverlay) {
+            // Add the {name} placeholder to the URL for dynamic replacement
             cloudinaryUrl = cloudinaryUrl.replace('/upload/', '/upload/l_text:Stalinist%20One_140_bold:{name},co_rgb:00e5ff,g_center/');
         }
         
@@ -1981,28 +2274,32 @@ async function processImageUpload(ctx, addOverlay) {
         } else if (imageType === 'menuImage') {
             updateField = { menuImage: cloudinaryUrl };
             imageTypeForDb = 'menu_image';
+        } else if (imageType === 'appImage') {
+            updateField = {}; // App images are handled separately
         }
         
-        // Store uploaded image info
-        await db.collection('admin').updateOne(
-            { type: 'config' },
-            { 
-                $set: { 
-                    ...updateField, 
-                    updatedAt: new Date(),
-                    [`imageOverlaySettings.${imageType}`]: addOverlay
-                },
-                $push: { 
-                    uploadedImages: {
-                        url: cloudinaryUrl,
-                        publicId: result.public_id,
-                        type: imageTypeForDb,
-                        hasOverlay: addOverlay,
-                        uploadedAt: new Date()
+        if (imageType !== 'appImage') {
+            // Store uploaded image info
+            await db.collection('admin').updateOne(
+                { type: 'config' },
+                { 
+                    $set: { 
+                        ...updateField, 
+                        updatedAt: new Date(),
+                        [`imageOverlaySettings.${imageType}`]: addOverlay
+                    },
+                    $push: { 
+                        uploadedImages: {
+                            url: cloudinaryUrl,
+                            publicId: result.public_id,
+                            type: imageTypeForDb,
+                            hasOverlay: addOverlay,
+                            uploadedAt: new Date()
+                        }
                     }
                 }
-            }
-        );
+            );
+        }
         
         await ctx.deleteMessage().catch(() => {});
         await safeSendMessage(ctx, `✅ Image uploaded and set as ${imageType.replace('Image', ' image')}!\n\nOverlay: ${addOverlay ? '✅ Yes' : '❌ No'}`);
@@ -3258,6 +3555,7 @@ scenes.addAppImage.on(['text', 'photo'], async (ctx) => {
             const overlaySettings = config?.imageOverlaySettings || { appImages: true };
             
             if (overlaySettings.appImages) {
+                // Add {name} placeholder for dynamic replacement
                 cloudinaryUrl = cloudinaryUrl.replace('/upload/', '/upload/l_text:Stalinist%20One_140_bold:{name},co_rgb:00e5ff,g_center/');
             }
             
@@ -3555,11 +3853,14 @@ bot.action('admin_manage_admins', async (ctx) => {
     try {
         const config = await db.collection('admin').findOne({ type: 'config' });
         const admins = config?.admins || ADMIN_IDS;
+        const mutedAdmins = config?.mutedAdmins || [];
         
         let text = '<b>👑 Manage Admins</b>\n\nCurrent Admins:\n';
         
         admins.forEach((adminId, index) => {
-            text += `${index + 1}. <code>${adminId}</code>\n`;
+            const isMuted = mutedAdmins.includes(adminId);
+            const status = isMuted ? '🔕' : '🔔';
+            text += `${index + 1}. ${status} <code>${adminId}</code>\n`;
         });
         
         text += '\nSelect an option:';
@@ -5490,6 +5791,7 @@ bot.command('status', async (ctx) => {
             const config = await db.collection('admin').findOne({ type: 'config' });
             statusText += `🗄️ <b>Database:</b> ✅ Connected\n`;
             statusText += `👑 <b>Admins:</b> ${config?.admins?.length || 0}\n`;
+            statusText += `🔕 <b>Muted Admins:</b> ${config?.mutedAdmins?.length || 0}\n`;
             
             const userCount = await db.collection('users').countDocuments();
             statusText += `👥 <b>Users:</b> ${userCount}\n`;
@@ -5560,7 +5862,7 @@ bot.catch = (error, ctx) => {
     if (errorCount >= MAX_ERRORS_BEFORE_RESTART) {
         console.error('🚨 CRITICAL: Too many errors, bot may be stuck');
         
-        // Notify admins
+        // Notify admins (excluding muted ones)
         notifyAdmin(`🚨 <b>Bot Error Alert</b>\n\nToo many errors detected (${errorCount}).\nBot may be stuck in error loop.\n\nUse /reseterrors to clear errors or restart the bot.`);
     }
     
@@ -5583,13 +5885,6 @@ isAdmin = async (userId) => {
 // ==========================================
 // TELEGRAM BOT - COMPLETE FIXED SOLUTION
 // ==========================================
-// Fixed: All bugs, proper flow, pagination, contact system
-// Added: Name overlay option for images
-// ==========================================
-
-// ... [REST OF THE CODE REMAINS THE SAME AS IN THE PREVIOUS FIXED VERSION]
-// Make sure to copy ALL the code from the previous fixed version here
-// Only change was moving the 'emergency' command handler to after bot initialization
 
 // ==========================================
 // START BOT - FIXED FOR RAILWAY
@@ -5638,7 +5933,7 @@ async function startBot() {
         // Send a test message to verify bot is working
         const testAdminId = 8435248854; // Your admin ID
         try {
-            await bot.telegram.sendMessage(testAdminId, '🤖 Bot started successfully!');
+            await bot.telegram.sendMessage(testAdminId, '🤖 Bot started successfully!\n\nNew Features:\n• 🔕 Mute notifications for admins\n• 📋 HTML formatting guide');
             console.log('✅ Test message sent to admin');
         } catch (error) {
             console.log('⚠️ Could not send test message, but bot is running');
