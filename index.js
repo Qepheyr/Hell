@@ -1585,96 +1585,77 @@ bot.action('admin_html_guide', async (ctx) => {
     if (!await isAdmin(ctx.from.id)) return;
     
     try {
-        const htmlGuide = `<b>📋 HTML Formatting Guide</b>\n\nTelegram supports HTML formatting in messages. Here are all available tags:\n\n`;
+        const htmlGuide = `<b>📋 HTML Formatting Guide</b>
 
-        // Create the HTML guide with examples
-        const htmlTags = [
-            {
-                tag: '<b>bold</b>, <strong>bold</strong>',
-                example: 'This is <b>bold text</b>',
-                copyable: '<b>bold text</b>'
-            },
-            {
-                tag: '<i>italic</i>, <em>italic</em>',
-                example: 'This is <i>italic text</i>',
-                copyable: '<i>italic text</i>'
-            },
-            {
-                tag: '<u>underline</u>, <ins>underline</ins>',
-                example: 'This is <u>underlined text</u>',
-                copyable: '<u>underlined text</u>'
-            },
-            {
-                tag: '<s>strikethrough</s>, <strike>strikethrough</strike>, <del>strikethrough</del>',
-                example: 'This is <s>strikethrough text</s>',
-                copyable: '<s>strikethrough text</s>'
-            },
-            {
-                tag: '<span class="tg-spoiler">spoiler</span>, <tg-spoiler>spoiler</tg-spoiler>',
-                example: 'This is <span class="tg-spoiler">spoiler text</span>',
-                copyable: '<span class="tg-spoiler">spoiler text</span>'
-            },
-            {
-                tag: '<code>inline code</code>',
-                example: 'This is <code>inline code</code>',
-                copyable: '<code>inline code</code>'
-            },
-            {
-                tag: '<pre>pre-formatted code block</pre>',
-                example: '<pre>function hello() {\n  console.log("Hello");\n}</pre>',
-                copyable: '<pre>Your code here</pre>'
-            },
-            {
-                tag: '<pre><code class="language-python">language-specific code</code></pre>',
-                example: '<pre><code class="language-python">def hello():\n    print("Hello")</code></pre>',
-                copyable: '<pre><code class="language-python">Your code here</code></pre>'
-            },
-            {
-                tag: '<a href="http://example.com">link text</a>',
-                example: 'Visit <a href="https://telegram.org">Telegram</a>',
-                copyable: '<a href="https://example.com">Link Text</a>'
-            },
-            {
-                tag: '<a href="tg://user?id=123456789">mention user</a>',
-                example: 'Hello <a href="tg://user?id=123456789">User</a>',
-                copyable: '<a href="tg://user?id=USER_ID">User Name</a>'
-            },
-            {
-                tag: '<blockquote>quoted text</blockquote>',
-                example: '<blockquote>This is a block quotation\nthat can span multiple lines</blockquote>',
-                copyable: '<blockquote>Your quoted text here</blockquote>'
-            },
-            {
-                tag: '<blockquote expandable>expandable quote</blockquote>',
-                example: '<blockquote expandable>This is an expandable quotation\nwith hidden text by default</blockquote>',
-                copyable: '<blockquote expandable>Your expandable text</blockquote>'
-            }
-        ];
+Telegram supports HTML formatting in messages. Here are all available tags:
 
-        let guideText = htmlGuide;
-        
-        htmlTags.forEach((item, index) => {
-            guideText += `<b>${index + 1}. ${item.tag}</b>\n`;
-            guideText += `Example: ${item.example}\n`;
-            guideText += `Copy: <code>${escapeMarkdown(item.copyable)}</code>\n\n`;
-        });
+<b>1. &lt;b&gt;bold&lt;/b&gt;, &lt;strong&gt;bold&lt;/strong&gt;</b>
+Example: This is <b>bold text</b>
+Copy: <code>&lt;b&gt;bold text&lt;/b&gt;</code>
 
-        // Add nested example
-        guideText += `<b>Nested Formatting Example:</b>\n`;
-        guideText += `<code>${escapeMarkdown('<b>bold <i>italic bold <s>italic bold strikethrough <span class="tg-spoiler">italic bold strikethrough spoiler</span></s> <u>underline italic bold</u></i> bold</b>')}</code>\n\n`;
+<b>2. &lt;i&gt;italic&lt;/i&gt;, &lt;em&gt;italic&lt;/em&gt;</b>
+Example: This is <i>italic text</i>
+Copy: <code>&lt;i&gt;italic text&lt;/i&gt;</code>
 
-        // Add emoji example
-        guideText += `<b>Custom Emoji:</b>\n`;
-        guideText += `<code>${escapeMarkdown('<tg-emoji emoji-id="5368324170671202286">👍</tg-emoji>')}</code>\n\n`;
+<b>3. &lt;u&gt;underline&lt;/u&gt;, &lt;ins&gt;underline&lt;/ins&gt;</b>
+Example: This is <u>underlined text</u>
+Copy: <code>&lt;u&gt;underlined text&lt;/u&gt;</code>
 
-        guideText += `<i>Note: When using HTML, make sure to escape &, <, > characters as &amp;, &lt;, &gt;</i>`;
+<b>4. &lt;s&gt;strikethrough&lt;/s&gt;, &lt;strike&gt;strikethrough&lt;/strike&gt;, &lt;del&gt;strikethrough&lt;/del&gt;</b>
+Example: This is <s>strikethrough text</s>
+Copy: <code>&lt;s&gt;strikethrough text&lt;/s&gt;</code>
+
+<b>5. &lt;span class="tg-spoiler"&gt;spoiler&lt;/span&gt;, &lt;tg-spoiler&gt;spoiler&lt;/tg-spoiler&gt;</b>
+Example: This is <span class="tg-spoiler">spoiler text</span>
+Copy: <code>&lt;span class="tg-spoiler"&gt;spoiler text&lt;/span&gt;</code>
+
+<b>6. &lt;code&gt;inline code&lt;/code&gt;</b>
+Example: This is <code>inline code</code>
+Copy: <code>&lt;code&gt;inline code&lt;/code&gt;</code>
+
+<b>7. &lt;pre&gt;pre-formatted code block&lt;/pre&gt;</b>
+Example: <pre>function hello() {
+  console.log("Hello");
+}</pre>
+Copy: <code>&lt;pre&gt;Your code here&lt;/pre&gt;</code>
+
+<b>8. &lt;pre&gt;&lt;code class="language-python"&gt;language-specific code&lt;/code&gt;&lt;/pre&gt;</b>
+Example: <pre><code class="language-python">def hello():
+    print("Hello")</code></pre>
+Copy: <code>&lt;pre&gt;&lt;code class="language-python"&gt;Your code here&lt;/code&gt;&lt;/pre&gt;</code>
+
+<b>9. &lt;a href="http://example.com"&gt;link text&lt;/a&gt;</b>
+Example: Visit <a href="https://telegram.org">Telegram</a>
+Copy: <code>&lt;a href="https://example.com"&gt;Link Text&lt;/a&gt;</code>
+
+<b>10. &lt;a href="tg://user?id=123456789"&gt;mention user&lt;/a&gt;</b>
+Example: Hello <a href="tg://user?id=123456789">User</a>
+Copy: <code>&lt;a href="tg://user?id=USER_ID"&gt;User Name&lt;/a&gt;</code>
+
+<b>11. &lt;blockquote&gt;quoted text&lt;/blockquote&gt;</b>
+Example: <blockquote>This is a block quotation
+that can span multiple lines</blockquote>
+Copy: <code>&lt;blockquote&gt;Your quoted text here&lt;/blockquote&gt;</code>
+
+<b>12. &lt;blockquote expandable&gt;expandable quote&lt;/blockquote&gt;</b>
+Example: <blockquote expandable>This is an expandable quotation
+with hidden text by default</blockquote>
+Copy: <code>&lt;blockquote expandable&gt;Your expandable text&lt;/blockquote&gt;</code>
+
+<b>Nested Formatting Example:</b>
+<code>&lt;b&gt;bold &lt;i&gt;italic bold &lt;s&gt;italic bold strikethrough &lt;span class="tg-spoiler"&gt;italic bold strikethrough spoiler&lt;/span&gt;&lt;/s&gt; &lt;u&gt;underline italic bold&lt;/u&gt;&lt;/i&gt; bold&lt;/b&gt;</code>
+
+<b>Custom Emoji:</b>
+<code>&lt;tg-emoji emoji-id="5368324170671202286"&gt;👍&lt;/tg-emoji&gt;</code>
+
+<i>Note: When using HTML, make sure to escape &amp;, &lt;, &gt; characters as &amp;amp;, &amp;lt;, &amp;gt;</i>`;
 
         const keyboard = [
             [{ text: '📝 Try in Message', callback_data: 'admin_startmessage' }],
             [{ text: '🔙 Back', callback_data: 'admin_back' }]
         ];
 
-        await safeEditMessage(ctx, guideText, {
+        await safeEditMessage(ctx, htmlGuide, {
             reply_markup: { inline_keyboard: keyboard }
         });
     } catch (error) {
